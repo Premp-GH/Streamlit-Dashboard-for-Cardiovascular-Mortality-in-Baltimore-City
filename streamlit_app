@@ -1,0 +1,119 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import statsmodels.formula.api as smf
+from statsmodels.iolib.summary2 import summary_col
+import matplotlib.pyplot as plt
+from scipy import stats
+import numpy as np
+
+st.set_page_config(page_title = "Cardiovascular Mortality in Baltimore City",
+                   layout = "wide",
+                   initial_sidebar_state = "expanded",
+                   )
+
+COL_OB = "obesity_pct"
+COL_PI = "physical_inactivity_pct"
+COL_CVD = "cvd_mortality_rate"
+COL_HBP = "high_bp_pct"
+
+
+obesity = pd.read_csv("data/obesity.csv")
+physical_inactivity = pd.read_csv("data/physical_inactivity.csv")
+cvd_mortality_rate = pd.read_csv("data/cardiovascular_mortality.csv")
+hbp = pd.read_csv("data/high_blood_pressure.csv")
+
+
+for df in [obesity, physical_inactivity, hbp, cvd_mortality_rate]:
+    df.columns = df.columns.str.strip()
+
+obesity = obesity[obesity["geo_name"].str.contains("Baltimore",case=False, na=False)]
+physical_inactivity = physical_inactivity[physical_inactivity["geo_name"].str.contains("Baltimore",case=False, na=False)]
+cvd_mortality_rate = cvd_mortality_rate[cvd_mortality_rate["geo_name"].str.contains("Baltimore",case=False, na=False)]
+hbp = hbp[hbp["geo_name"].str.contains("Baltimore",case=False, na=False)]
+
+#Renaming - Just to remember
+#data_period = year
+#val = value
+
+obesity = obesity[["data_period","est"]].rename(columns={
+    "data_period":"Year",
+    "est":"obesity_pct"
+})
+physical_inactivity = physical_inactivity[["data_period","est"]].rename(columns={
+    "data_period":"Year",
+    "est":"physical_inactivity_pct"
+})
+cvd_mortality_rate = cvd_mortality_rate[["data_period","est"]].rename(columns={
+    "data_period":"Year",
+    "est":"cvd_mortality_rate"
+})
+hbp = hbp[["data_period","est"]].rename(columns={
+    "data_period":"Year",
+    "est":"high_bp_pct"
+})
+
+master = obesity.merge(physical_inactivity,on="Year",how="inner")
+master = master.merge(hbp, on="Year", how="inner")
+master = master.merge(cvd_mortality_rate, on="Year", how="inner")
+
+print(master.info())
+print(master.head())
+print(master.isna().sum())
+
+master.to_csv("data/baltimore_health_master.csv",index=False)
+
+
+
+st.title("Baltimore City Cardiovascular Risk Dashboard")
+
+st.write("This app explores which health predictors: Obesity, Physical Inactivity, and Hypertension best predict Cardiovascular Mortality in Baltimore")
+
+@st.cache_data
+def load_data():
+    df = pd.read_csv("data/baltimore_health_master.csv")
+    return df.sort_values("Year")
+df = load_data()
+
+st.header("Dataset Preview")
+st.dataframe(df)
+
+st.header("Trend Explorer")
+selected_metrics = st.multiselect (
+    "Choose an indicator/predictor to display",
+    [COL_OB, COL_PI, COL_CVD, COL_HBP],
+    default = [COL_OB, COL_PI, COL_HBP]
+)
+
+if selected_metrics:
+    trend_df = df[["Year"] + selected_metrics].set_index("Year")
+    st.line_chart(trend_df)
+
+st.header("Relationship Explorer")
+
+x_var = st.selectbox(
+    "Choose predictor",
+    [COL_OB,COL_PI,COL_HBP],
+)
+
+fig = px.scatter(
+    df,
+    x=x_var,
+    y=COL_CVD,
+    trendline="ols",
+    title = f"{x_var} vs. {COL_CVD}"
+)
+st.plotly_chart(fig,use_container_width=True)
+
+st.header("Regression Results")
+
+model=smf.ols(
+    f"{COL_CVD}~{COL_OB}+{COL_HBP}+{COL_PI}",
+    data=df.dropna()
+).fit()
+st.text(model.summary().as_text())
+
+st.header("Interpretation of Findings")
+st.write("Physical Inactivity remained the strongest independent indicator of CVD mortality in Baltimore,MD")
+st.write("Hypertension may contribute indirectly by increasing physical inactivity and obesity in Baltimore,MD")
+st.write("These findings reflect public health theory that lack of exercise cause heart disease by weakening the heart muscle, encouraging vascular plaque buildup, and the reduction of the production of enzymes needed to break down fat in the blood.")
